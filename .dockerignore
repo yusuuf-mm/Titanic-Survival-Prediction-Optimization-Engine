@@ -1,0 +1,14 @@
+# .dockerignore
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.Python
+venv/
+notebooks/
+data/
+optimization/
+*.ipynb
+.git/
+.gitignore
+README.md
