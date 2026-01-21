@@ -341,7 +341,7 @@ Contributions welcome! Please open an issue or submit a pull request.
 
 ## 👤 Author
 
-Your Name - [Your Email]
+Yusuf Musa - yusuf2000mm@gmail.com
 
 ## 🙏 Acknowledgments
 
