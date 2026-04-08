@@ -12,20 +12,80 @@ from pulp import LpProblem, LpMaximize, LpVariable, lpSum, LpStatus, value
 import joblib
 import matplotlib.pyplot as plt
 import seaborn as sns
+import boto3
+import logging
+import os
+from datetime import datetime
+import time
+from io import BytesIO
+
+# Configure logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
+
+# Environment variables for configuration
+S3_BUCKET = os.getenv('S3_BUCKET_NAME', 'titanic-prediction-bucket')
+DYNAMODB_TABLE_OPTIMIZATION = os.getenv('DYNAMODB_TABLE_OPTIMIZATION', 'optimization-results')
+AWS_REGION = os.getenv('AWS_REGION', 'us-east-1')
+
+# Lazy AWS client initialization
+_s3_client = None
+_dynamodb_client = None
+
+def get_s3_client():
+    """Lazy initialization of S3 client"""
+    global _s3_client
+    if _s3_client is None:
+        _s3_client = boto3.client('s3', region_name=AWS_REGION)
+    return _s3_client
+
+def get_dynamodb_client():
+    """Lazy initialization of DynamoDB client"""
+    global _dynamodb_client
+    if _dynamodb_client is None:
+        _dynamodb_client = boto3.client('dynamodb', region_name=AWS_REGION)
+    return _dynamodb_client
 
 class LifeboatOptimizer:
     """
     Optimize lifeboat seat allocation using predicted survival probabilities
     """
     
-    def __init__(self, model_path='../model.pkl', scaler_path='../scaler.pkl',
-                 le_sex_path='../le_sex.pkl', le_embarked_path='../le_embarked.pkl'):
-        """Load ML model and preprocessors"""
-        self.model = joblib.load(model_path)
-        self.scaler = joblib.load(scaler_path)
-        self.le_sex = joblib.load(le_sex_path)
-        self.le_embarked = joblib.load(le_embarked_path)
-    
+    def __init__(self):
+        """Load ML model and preprocessors from S3 using streaming"""
+        try:
+            s3 = get_s3_client()
+            # Use BytesIO for streaming load to avoid loading entire file into memory
+            self.model = joblib.load(BytesIO(s3.get_object(Bucket=S3_BUCKET, Key='model.pkl')['Body'].read()))
+            self.scaler = joblib.load(BytesIO(s3.get_object(Bucket=S3_BUCKET, Key='scaler.pkl')['Body'].read()))
+            self.le_sex = joblib.load(BytesIO(s3.get_object(Bucket=S3_BUCKET, Key='le_sex.pkl')['Body'].read()))
+            self.le_embarked = joblib.load(BytesIO(s3.get_object(Bucket=S3_BUCKET, Key='le_embarked.pkl')['Body'].read()))
+            logger.info("Models loaded successfully from S3 for optimization")
+        except Exception as e:
+            logger.error(f"Failed to load models from S3: {e}")
+            raise
+
+    def log_optimization_to_dynamodb(self, results, capacity, priority_children, priority_women, max_family_members):
+        """Log optimization results to DynamoDB"""
+        try:
+            dynamodb = get_dynamodb_client()
+            item = {
+                'id': {'S': str(int(time.time() * 1000000))},  # Unique ID
+                'timestamp': {'S': datetime.utcnow().isoformat()},
+                'capacity': {'N': str(capacity)},
+                'status': {'S': results['status']},
+                'objective_value': {'N': str(results['objective_value'])},
+                'selected_count': {'N': str(results['selected_count'])},
+                'utilization': {'N': str(results['utilization'])},
+                'priority_children': {'BOOL': priority_children},
+                'priority_women': {'BOOL': priority_women},
+                'max_family_members': {'N': str(max_family_members) if max_family_members else '0'}
+            }
+            dynamodb.put_item(TableName=DYNAMODB_TABLE_OPTIMIZATION, Item=item)
+            logger.info("Optimization results logged to DynamoDB")
+        except Exception as e:
+            logger.error(f"Failed to log optimization to DynamoDB: {e}")
+
     def predict_survival_probabilities(self, passenger_df):
         """
         Predict survival probabilities for passengers
@@ -131,8 +191,11 @@ class LifeboatOptimizer:
             'passengers_data': passengers_df.iloc[selected].copy()
         }
         
+        # Log optimization results
+        self.log_optimization_to_dynamodb(results, capacity, priority_children, priority_women, max_family_members)
+
         return results
-    
+
     def visualize_results(self, results, passengers_df):
         """Visualize optimization results"""
         
@@ -216,7 +279,7 @@ def main():
     sample_df = df.sample(n=200, random_state=42).reset_index(drop=True)
     
     # Initialize optimizer
-    print("Initializing optimizer...")
+    logger.info("Initializing optimizer...")
     optimizer = LifeboatOptimizer()
     
     # Run optimization with different capacity scenarios

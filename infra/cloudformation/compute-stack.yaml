@@ -1,0 +1,225 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: "Compute stack for Titanic ML project: Lambda for predictions and ECS for batch processing"
+
+Parameters:
+  BucketName:
+    Type: String
+    Description: "Name of the S3 bucket from storage stack"
+    Default: "titanic-ml-models-bucket"
+
+  TableName:
+    Type: String
+    Description: "Name of the DynamoDB table from storage stack"
+    Default: "TitanicLogsTable"
+
+  ImageUri:
+    Type: String
+    Description: "URI of the Docker image for ECS tasks"
+    Default: "123456789012.dkr.ecr.us-east-1.amazonaws.com/titanic-ml:latest"
+
+Resources:
+  # VPC for ECS
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: "10.0.0.0/16"
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+
+  VPCGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref VPC
+      InternetGatewayId: !Ref InternetGateway
+
+  PublicSubnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: "10.0.1.0/24"
+      AvailabilityZone: !Select [0, !GetAZs ""]
+
+  RouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+
+  Route:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref RouteTable
+      DestinationCidrBlock: "0.0.0.0/0"
+      GatewayId: !Ref InternetGateway
+
+  SubnetRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnet
+      RouteTableId: !Ref RouteTable
+
+  SecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: "Security group for ECS tasks"
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: "0.0.0.0/0"
+
+  # IAM Roles
+  LambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: S3AndDynamoAccess
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - dynamodb:PutItem
+                Resource:
+                  - !Sub "arn:aws:s3:::${BucketName}/*"
+                  - !Sub "arn:aws:dynamodb:*:*:table/${TableName}"
+
+  ECSTaskExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+
+  ECSTaskRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: S3AndDynamoAccess
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                  - dynamodb:PutItem
+                  - dynamodb:GetItem
+                Resource:
+                  - !Sub "arn:aws:s3:::${BucketName}/*"
+                  - !Sub "arn:aws:dynamodb:*:*:table/${TableName}"
+
+  # Lambda Function
+  PredictionLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: TitanicPredictionFunction
+      Runtime: python3.9
+      Handler: predict.handler
+      Code:
+        ZipFile: |
+          import json
+          import boto3
+          import pickle
+          import numpy as np
+          from io import BytesIO
+
+          s3 = boto3.client('s3')
+          dynamodb = boto3.resource('dynamodb')
+
+          def handler(event, context):
+              # Dummy code, assume model loaded
+              return {'statusCode': 200, 'body': json.dumps({'survival': 1})}
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Environment:
+        Variables:
+          BUCKET_NAME: !Ref BucketName
+          TABLE_NAME: !Ref TableName
+
+  # ECS Resources
+  ECSCluster:
+    Type: AWS::ECS::Cluster
+    Properties:
+      ClusterName: TitanicMLCluster
+
+  ECSTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: titanic-optimization-task
+      NetworkMode: awsvpc
+      RequiresCompatibilities:
+        - FARGATE
+      Cpu: "256"
+      Memory: "512"
+      ExecutionRoleArn: !GetAtt ECSTaskExecutionRole.Arn
+      TaskRoleArn: !GetAtt ECSTaskRole.Arn
+      ContainerDefinitions:
+        - Name: optimization-container
+          Image: !Ref ImageUri
+          Essential: true
+          Environment:
+            - Name: BUCKET_NAME
+              Value: !Ref BucketName
+            - Name: TABLE_NAME
+              Value: !Ref TableName
+
+  ECSService:
+    Type: AWS::ECS::Service
+    Properties:
+      ServiceName: TitanicOptimizationService
+      Cluster: !Ref ECSCluster
+      TaskDefinition: !Ref ECSTaskDefinition
+      DesiredCount: 0
+      LaunchType: FARGATE
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          Subnets:
+            - !Ref PublicSubnet
+          SecurityGroups:
+            - !Ref SecurityGroup
+          AssignPublicIp: ENABLED
+
+Outputs:
+  LambdaFunctionArn:
+    Description: "ARN of the Lambda function"
+    Value: !GetAtt PredictionLambda.Arn
+    Export:
+      Name: !Sub "${AWS::StackName}-LambdaFunctionArn"
+
+  ECSClusterName:
+    Description: "Name of the ECS cluster"
+    Value: !Ref ECSCluster
+    Export:
+      Name: !Sub "${AWS::StackName}-ECSClusterName"
+
+  ECSTaskDefinitionArn:
+    Description: "ARN of the ECS task definition"
+    Value: !Ref ECSTaskDefinition
+    Export:
+      Name: !Sub "${AWS::StackName}-ECSTaskDefinitionArn"

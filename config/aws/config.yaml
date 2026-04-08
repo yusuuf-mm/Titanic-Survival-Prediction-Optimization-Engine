@@ -1,0 +1,6 @@
+# AWS Configuration
+# Note: Replace with your actual AWS account ID or use environment variable substitution
+region: us-east-1
+ecr_repo: "123456789012.dkr.ecr.us-east-1.amazonaws.com"
+s3_bucket: titanic-prediction-bucket
+stack_prefix: titanic-prediction

@@ -1,0 +1,199 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: "API stack for Titanic ML project: API Gateway with routes to Lambda and ECS"
+
+Parameters:
+  LambdaFunctionArn:
+    Type: String
+    Description: "ARN of the Lambda function from compute stack"
+
+  ECSClusterName:
+    Type: String
+    Description: "Name of the ECS cluster from compute stack"
+
+  ECSTaskDefinitionArn:
+    Type: String
+    Description: "ARN of the ECS task definition from compute stack"
+
+  SubnetId:
+    Type: String
+    Description: "ID of the public subnet from compute stack"
+
+  SecurityGroupId:
+    Type: String
+    Description: "ID of the security group from compute stack"
+
+  BucketName:
+    Type: String
+    Description: "S3 bucket name"
+    Default: "titanic-ml-models-bucket"
+
+  TableName:
+    Type: String
+    Description: "DynamoDB table name"
+    Default: "TitanicLogsTable"
+
+Resources:
+  # IAM Role for API Gateway to invoke Lambda and ECS
+  ApiGatewayExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: apigateway.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: InvokeLambdaAndRunTask
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - lambda:InvokeFunction
+                  - ecs:RunTask
+                Resource:
+                  - !Ref LambdaFunctionArn
+                  - !Ref ECSTaskDefinitionArn
+                  - !Sub "arn:aws:ecs:*:*:cluster/${ECSClusterName}"
+
+  # Lambda for triggering ECS tasks
+  BatchLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: TitanicBatchFunction
+      Runtime: python3.9
+      Handler: batch.handler
+      Code:
+        ZipFile: |
+          import json
+          import boto3
+
+          ecs = boto3.client('ecs')
+
+          def handler(event, context):
+              response = ecs.run_task(
+                  cluster='${ECSClusterName}',
+                  taskDefinition='${ECSTaskDefinitionArn}',
+                  launchType='FARGATE',
+                  networkConfiguration={
+                      'awsvpcConfiguration': {
+                          'subnets': ['${SubnetId}'],  # From compute stack
+                          'securityGroups': ['${SecurityGroupId}'],
+                          'assignPublicIp': 'ENABLED'
+                      }
+                  }
+              )
+              return {'statusCode': 200, 'body': json.dumps({'taskArn': response['tasks'][0]['taskArn']})}
+      Role: !Ref BatchLambdaExecutionRole
+      Environment:
+        Variables:
+          CLUSTER_NAME: !Ref ECSClusterName
+          TASK_DEF: !Ref ECSTaskDefinitionArn
+
+  BatchLambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: ECSRunTask
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: ecs:RunTask
+                Resource: !Ref ECSTaskDefinitionArn
+
+  # Update BatchLambda to use correct role
+  # Note: In real CF, use Ref for role in Lambda
+
+  # API Gateway
+  ApiGateway:
+    Type: AWS::ApiGateway::RestApi
+    Properties:
+      Name: TitanicMLApi
+      Description: "API for Titanic ML predictions and optimizations"
+
+  PredictResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref ApiGateway
+      ParentId: !GetAtt ApiGateway.RootResourceId
+      PathPart: "predict"
+
+  PredictMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref ApiGateway
+      ResourceId: !Ref PredictResource
+      HttpMethod: POST
+      AuthorizationType: AWS_IAM
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${LambdaFunctionArn}/invocations"
+
+  OptimizeResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref ApiGateway
+      ParentId: !GetAtt ApiGateway.RootResourceId
+      PathPart: "optimize"
+
+  OptimizeMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref ApiGateway
+      ResourceId: !Ref OptimizeResource
+      HttpMethod: POST
+      AuthorizationType: AWS_IAM
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${BatchLambda}/invocations"
+
+  ApiDeployment:
+    Type: AWS::ApiGateway::Deployment
+    DependsOn: [PredictMethod, OptimizeMethod]
+    Properties:
+      RestApiId: !Ref ApiGateway
+      StageName: "prod"
+
+  # Permissions for API Gateway to invoke Lambda
+  LambdaInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref LambdaFunctionArn
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub "arn:aws:apigateway:${AWS::Region}::/restapis/${ApiGateway}/stages/prod"
+
+  BatchLambdaInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref BatchLambda
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub "arn:aws:apigateway:${AWS::Region}::/restapis/${ApiGateway}/stages/prod"
+
+Outputs:
+  ApiGatewayId:
+    Description: "ID of the API Gateway"
+    Value: !Ref ApiGateway
+    Export:
+      Name: !Sub "${AWS::StackName}-ApiGatewayId"
+
+  ApiUrl:
+    Description: "URL of the API Gateway"
+    Value: !Sub "https://${ApiGateway}.execute-api.${AWS::Region}.amazonaws.com/prod"
+    Export:
+      Name: !Sub "${AWS::StackName}-ApiUrl"

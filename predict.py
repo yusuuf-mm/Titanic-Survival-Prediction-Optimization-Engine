@@ -3,13 +3,54 @@
 Titanic Survival Prediction API
 """
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from pydantic import BaseModel, Field
 import joblib
 import numpy as np
 import pandas as pd
 from typing import Optional
 import os
+import boto3
+import logging
+from datetime import datetime
+from functools import wraps
+import time
+from io import BytesIO
+
+# Configure logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
+
+# Environment variables for configuration
+S3_BUCKET = os.getenv('S3_BUCKET_NAME', 'titanic-prediction-bucket')
+DYNAMODB_TABLE = os.getenv('DYNAMODB_TABLE_NAME', 'predictions')
+RATE_LIMIT_TABLE = os.getenv('RATE_LIMIT_TABLE', 'rate-limits')
+AWS_REGION = os.getenv('AWS_REGION', 'us-east-1')
+ENABLE_RATE_LIMIT = os.getenv('ENABLE_RATE_LIMIT', 'true').lower() == 'true'
+
+# Validate required environment variables
+if not DYNAMODB_TABLE:
+    raise ValueError("DYNAMODB_TABLE_NAME environment variable is required")
+if not RATE_LIMIT_TABLE:
+    raise ValueError("RATE_LIMIT_TABLE environment variable is required")
+
+# Lazy AWS client initialization
+_s3_client = None
+_dynamodb_client = None
+
+def get_s3_client():
+    """Lazy initialization of S3 client"""
+    global _s3_client
+    if _s3_client is None:
+        _s3_client = boto3.client('s3', region_name=AWS_REGION)
+    return _s3_client
+
+def get_dynamodb_client():
+    """Lazy initialization of DynamoDB client"""
+    global _dynamodb_client
+    if _dynamodb_client is None:
+        _dynamodb_client = boto3.client('dynamodb', region_name=AWS_REGION)
+    return _dynamodb_client
 
 # Initialize FastAPI app
 app = FastAPI(
@@ -18,15 +59,26 @@ app = FastAPI(
     version="1.0.0"
 )
 
-# Load models and preprocessors
+
+def load_model_from_s3(bucket, key):
+    """Load model artifact from S3 using streaming"""
+    try:
+        client = get_s3_client()
+        response = client.get_object(Bucket=bucket, Key=key)
+        return joblib.load(BytesIO(response['Body'].read()))
+    except Exception as e:
+        logger.error(f"Failed to load {key} from S3: {e}")
+        raise
+
+# Load models and preprocessors from S3
 try:
-    model = joblib.load('model.pkl')
-    scaler = joblib.load('scaler.pkl')
-    le_sex = joblib.load('le_sex.pkl')
-    le_embarked = joblib.load('le_embarked.pkl')
-    print("Models loaded successfully!")
+    model = load_model_from_s3(S3_BUCKET, 'model.pkl')
+    scaler = load_model_from_s3(S3_BUCKET, 'scaler.pkl')
+    le_sex = load_model_from_s3(S3_BUCKET, 'le_sex.pkl')
+    le_embarked = load_model_from_s3(S3_BUCKET, 'le_embarked.pkl')
+    logger.info("Models loaded successfully from S3!")
 except Exception as e:
-    print(f"Error loading models: {e}")
+    logger.error(f"Error loading models: {e}")
     model = None
 
 # Input schema
@@ -58,6 +110,90 @@ class PredictionResponse(BaseModel):
     survival_probability: float
     message: str
 
+def log_prediction_to_dynamodb(passenger_data, prediction, probability):
+    """Log prediction to DynamoDB"""
+    try:
+        client = get_dynamodb_client()
+        item = {
+            'id': {'S': str(int(time.time() * 1000000))},  # Unique ID
+            'timestamp': {'S': datetime.utcnow().isoformat()},
+            'pclass': {'N': str(passenger_data.pclass)},
+            'sex': {'S': passenger_data.sex},
+            'age': {'N': str(passenger_data.age)},
+            'sibsp': {'N': str(passenger_data.sibsp)},
+            'parch': {'N': str(passenger_data.parch)},
+            'fare': {'N': str(passenger_data.fare)},
+            'embarked': {'S': passenger_data.embarked},
+            'survived': {'N': str(prediction)},
+            'survival_probability': {'N': str(probability)}
+        }
+        client.put_item(TableName=DYNAMODB_TABLE, Item=item)
+        logger.info("Prediction logged to DynamoDB")
+    except Exception as e:
+        logger.error(f"Failed to log prediction to DynamoDB: {e}")
+
+def rate_limit(request: Request):
+    """Rate limiting using DynamoDB for distributed/multi-worker environments
+    
+    Uses fail-closed approach for security - if rate limiting fails,
+    requests are denied to prevent abuse. Includes automatic TTL cleanup.
+    Can be disabled via ENABLE_RATE_LIMIT env var.
+    """
+    # Skip rate limiting if disabled
+    if not ENABLE_RATE_LIMIT:
+        return
+    
+    client_ip = request.headers.get('X-Forwarded-For', request.client.host)
+    current_window = int(time.time() / 60)  # 1-minute windows
+    rate_key = f"ratelimit:{client_ip}:{current_window}"
+    current_time = int(time.time())
+    
+    # Configurable rate limit - default 60 requests per minute
+    rate_limit_max = int(os.getenv('RATE_LIMIT_MAX', '60'))
+    
+    try:
+        dynamodb = get_dynamodb_client()
+        
+        # Try to get current count from DynamoDB
+        response = dynamodb.get_item(
+            TableName=RATE_LIMIT_TABLE,
+            Key={'id': {'S': rate_key}}
+        )
+        
+        current_count = 0
+        if 'Item' in response:
+            # Check if entry has expired
+            expires_at = int(response['Item'].get('expires', {}).get('N', 0))
+            if expires_at > 0 and current_time > expires_at:
+                # Entry expired, delete it and start fresh
+                dynamodb.delete_item(
+                    TableName=RATE_LIMIT_TABLE,
+                    Key={'id': {'S': rate_key}}
+                )
+                current_count = 0
+            else:
+                current_count = int(response['Item']['count']['N'])
+        
+        # Check if rate limit exceeded
+        if current_count >= rate_limit_max:
+            raise HTTPException(status_code=429, detail="Rate limit exceeded. Try again later.")
+        
+        # Increment counter
+        dynamodb.put_item(
+            TableName=RATE_LIMIT_TABLE,
+            Item={
+                'id': {'S': rate_key},
+                'count': {'N': str(current_count + 1)},
+                'expires': {'N': str(current_time + 60)}
+            }
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        # Fail-closed: deny request if rate limiting fails for security
+        logger.error(f"Rate limiting failed (fail-closed): {e}")
+        raise HTTPException(status_code=503, detail="Rate limiting temporarily unavailable")
+
 # Root endpoint
 @app.get("/")
 def root():
@@ -75,24 +211,39 @@ def root():
 @app.get("/health")
 def health_check():
     if model is None:
+        logger.error("Health check failed: Model not loaded")
         raise HTTPException(status_code=503, detail="Model not loaded")
+    logger.info("Health check passed")
     return {"status": "healthy", "model_loaded": True}
 
 # Prediction endpoint
 @app.post("/predict", response_model=PredictionResponse)
-def predict_survival(passenger: PassengerData):
+def predict_survival(passenger: PassengerData, request: Request):
     """
     Predict whether a passenger would survive the Titanic disaster
     """
-    
+
+    # Rate limiting
+    rate_limit(request)
+
     if model is None:
         raise HTTPException(status_code=503, detail="Model not loaded")
-    
+
     try:
+        # Additional input validation
+        if passenger.fare < 0:
+            raise ValueError("Fare cannot be negative")
+        if passenger.age < 0 or passenger.age > 120:
+            raise ValueError("Age must be between 0 and 120")
+        if passenger.sex.lower() not in ['male', 'female']:
+            raise ValueError("Sex must be 'male' or 'female'")
+        if passenger.embarked.upper() not in ['C', 'Q', 'S']:
+            raise ValueError("Embarked must be 'C', 'Q', or 'S'")
+
         # Feature engineering
         family_size = passenger.sibsp + passenger.parch + 1
         is_alone = 1 if family_size == 1 else 0
-        
+
         # Create feature dictionary
         features = {
             'pclass': passenger.pclass,
@@ -105,34 +256,39 @@ def predict_survival(passenger: PassengerData):
             'family_size': family_size,
             'is_alone': is_alone
         }
-        
+
         # Convert to DataFrame
         df = pd.DataFrame([features])
-        
+
         # Encode categorical variables
         df['sex'] = le_sex.transform(df['sex'])
         df['embarked'] = le_embarked.transform(df['embarked'])
-        
+
         # Scale features
         X = scaler.transform(df)
-        
+
         # Make prediction
         prediction = model.predict(X)[0]
         probability = model.predict_proba(X)[0][1]
-        
+
         # Prepare response
         survived = int(prediction)
         message = "Likely to survive" if survived == 1 else "Unlikely to survive"
-        
+
+        # Log prediction to DynamoDB
+        log_prediction_to_dynamodb(passenger, survived, probability)
+
         return PredictionResponse(
             survived=survived,
             survival_probability=float(probability),
             message=message
         )
-        
+
     except ValueError as e:
+        logger.warning(f"Validation error: {e}")
         raise HTTPException(status_code=400, detail=f"Invalid input: {str(e)}")
     except Exception as e:
+        logger.error(f"Prediction error: {e}")
         raise HTTPException(status_code=500, detail=f"Prediction error: {str(e)}")
 
 # Batch prediction endpoint
@@ -140,21 +296,30 @@ class BatchPassengerData(BaseModel):
     passengers: list[PassengerData]
 
 @app.post("/predict/batch")
-def predict_batch(data: BatchPassengerData):
+def predict_batch(data: BatchPassengerData, request: Request):
     """
     Make predictions for multiple passengers
     """
+    # Rate limiting
+    rate_limit(request)
+
     if model is None:
         raise HTTPException(status_code=503, detail="Model not loaded")
-    
+
+    # Additional validation for batch
+    if len(data.passengers) > 100:
+        raise HTTPException(status_code=400, detail="Batch size cannot exceed 100 passengers")
+
     results = []
     for passenger in data.passengers:
         try:
-            result = predict_survival(passenger)
+            result = predict_survival(passenger, request)
             results.append(result.dict())
         except Exception as e:
+            logger.warning(f"Batch prediction error for passenger: {e}")
             results.append({"error": str(e)})
-    
+
+    logger.info(f"Batch prediction completed for {len(data.passengers)} passengers")
     return {"predictions": results}
 
 if __name__ == "__main__":

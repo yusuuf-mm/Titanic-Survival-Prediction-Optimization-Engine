@@ -1,0 +1,77 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: "Storage stack for Titanic ML project: S3 bucket for models and DynamoDB table for logs"
+
+Parameters:
+  BucketName:
+    Type: String
+    Description: "Name of the S3 bucket for storing models"
+    Default: "titanic-ml-models-bucket"
+
+  TableName:
+    Type: String
+    Description: "Name of the DynamoDB table for logs"
+    Default: "TitanicLogsTable"
+
+Resources:
+  ModelsBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Ref BucketName
+      VersioningConfiguration:
+        Status: Enabled
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+
+  LogsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Ref TableName
+      AttributeDefinitions:
+        - AttributeName: id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: id
+          KeyType: HASH
+      BillingMode: PAY_PER_REQUEST
+
+  # Rate limiting table for distributed rate limiting
+  RateLimitTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: "rate-limits"
+      AttributeDefinitions:
+        - AttributeName: id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: id
+          KeyType: HASH
+      BillingMode: PAY_PER_REQUEST
+      TimeToLiveSpecification:
+        AttributeName: expires
+        Enabled: true
+
+Outputs:
+  ModelsBucketName:
+    Description: "Name of the S3 bucket"
+    Value: !Ref ModelsBucket
+    Export:
+      Name: !Sub "${AWS::StackName}-ModelsBucketName"
+
+  LogsTableName:
+    Description: "Name of the DynamoDB table"
+    Value: !Ref LogsTable
+    Export:
+      Name: !Sub "${AWS::StackName}-LogsTableName"
+
+  LogsTableArn:
+    Description: "ARN of the DynamoDB table"
+    Value: !GetAtt LogsTable.Arn
+    Export:
+      Name: !Sub "${AWS::StackName}-LogsTableArn"

@@ -1,0 +1,32 @@
+# S3 Configuration for Titanic ETL Pipeline
+
+# AWS Settings
+aws:
+  region: us-east-1
+  profile: default  # Use default AWS credentials chain
+
+# S3 Bucket Names (replace {env} with dev/staging/prod)
+buckets:
+  raw: titanic-etl-raw-{env}
+  processed: titanic-etl-processed-{env}
+
+# Pipeline Settings
+pipeline:
+  # Source URL for Titanic dataset
+  source_url: "https://raw.githubusercontent.com/datasciencedojo/datasets/master/titanic.csv"
+  
+  # File names
+  raw_file: "titanic_raw.csv"
+  cleaned_file: "titanic_cleaned.csv"
+  processed_file: "titanic_training.csv"
+  
+  # Data processing settings
+  batch_size: 1000
+  encoding: utf-8
+
+# Local development settings (when not using S3)
+local:
+  enabled: true
+  data_dir: "./data"
+  raw_dir: "./data/raw"
+  processed_dir: "./data/processed"

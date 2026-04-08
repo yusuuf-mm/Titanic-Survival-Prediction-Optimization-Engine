@@ -11,6 +11,26 @@ from xgboost import XGBClassifier
 from sklearn.metrics import accuracy_score, classification_report
 import joblib
 import os
+import boto3
+import logging
+
+# Configure logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
+
+# Environment variables for configuration
+S3_BUCKET = os.getenv('S3_BUCKET_NAME', 'titanic-prediction-bucket')
+AWS_REGION = os.getenv('AWS_REGION', 'us-east-1')
+
+# Lazy S3 client initialization
+_s3_client = None
+
+def get_s3_client():
+    """Lazy initialization of S3 client"""
+    global _s3_client
+    if _s3_client is None:
+        _s3_client = boto3.client('s3', region_name=AWS_REGION)
+    return _s3_client
 
 def load_and_preprocess_data(filepath='data/titanic.csv'):
     """Load and preprocess the Titanic dataset"""
@@ -106,28 +126,65 @@ def evaluate_model(model, X_test, y_test):
     
     return accuracy
 
-def save_artifacts(model, scaler, le_sex, le_embarked, output_dir='.'):
-    """Save model and preprocessing objects"""
-    print("\nSaving model and preprocessing objects...")
+def upload_artifacts_to_s3(model, scaler, le_sex, le_embarked):
+    """Upload model and preprocessing objects to S3, with local fallback"""
+    # Check if S3 upload should be attempted
+    upload_to_s3 = os.getenv('UPLOAD_TO_S3', 'true').lower() == 'true'
     
-    os.makedirs(output_dir, exist_ok=True)
+    if not upload_to_s3:
+        logger.info("S3 upload disabled (UPLOAD_TO_S3=false), skipping...")
+        # Save locally as fallback
+        _save_artifacts_locally(model, scaler, le_sex, le_embarked)
+        return
     
-    joblib.dump(model, os.path.join(output_dir, 'model.pkl'))
-    joblib.dump(scaler, os.path.join(output_dir, 'scaler.pkl'))
-    joblib.dump(le_sex, os.path.join(output_dir, 'le_sex.pkl'))
-    joblib.dump(le_embarked, os.path.join(output_dir, 'le_embarked.pkl'))
+    logger.info("Uploading model and preprocessing objects to S3...")
+
+    artifacts = {
+        'model.pkl': model,
+        'scaler.pkl': scaler,
+        'le_sex.pkl': le_sex,
+        'le_embarked.pkl': le_embarked
+    }
+
+    for filename, artifact in artifacts.items():
+        try:
+            # Save to temporary file first
+            joblib.dump(artifact, filename)
+            # Upload to S3 using lazy client
+            s3 = get_s3_client()
+            s3.upload_file(filename, S3_BUCKET, filename)
+            # Clean up temporary file
+            os.remove(filename)
+            logger.info(f"Uploaded {filename} to S3")
+        except Exception as e:
+            logger.error(f"Failed to upload {filename} to S3: {e}")
+            logger.info("Falling back to local storage...")
+            # Save locally instead
+            _save_artifacts_locally(model, scaler, le_sex, le_embarked)
+            return
+
+    logger.info("All artifacts uploaded successfully to S3")
+
+def _save_artifacts_locally(model, scaler, le_sex, le_embarked):
+    """Save artifacts to local directory as fallback"""
+    artifacts = {
+        'model.pkl': model,
+        'scaler.pkl': scaler,
+        'le_sex.pkl': le_sex,
+        'le_embarked.pkl': le_embarked
+    }
     
-    print("Saved:")
-    print("  - model.pkl")
-    print("  - scaler.pkl")
-    print("  - le_sex.pkl")
-    print("  - le_embarked.pkl")
+    local_dir = os.getenv('LOCAL_MODEL_DIR', 'models')
+    os.makedirs(local_dir, exist_ok=True)
+    
+    for filename, artifact in artifacts.items():
+        filepath = os.path.join(local_dir, filename)
+        joblib.dump(artifact, filepath)
+        logger.info(f"Saved {filename} locally to {filepath}")
 
 def main():
     """Main training pipeline"""
-    print("="*60)
-    print("TITANIC SURVIVAL PREDICTION - TRAINING PIPELINE")
-    print("="*60)
+    logger.info("Starting Titanic Survival Prediction - Training Pipeline")
     
     # Load data
     X, y = load_and_preprocess_data()
@@ -152,13 +209,10 @@ def main():
     # Evaluate
     accuracy = evaluate_model(model, X_test_scaled, y_test)
     
-    # Save
-    save_artifacts(model, scaler, le_sex, le_embarked)
+    # Upload to S3
+    upload_artifacts_to_s3(model, scaler, le_sex, le_embarked)
     
-    print("\n" + "="*60)
-    print("TRAINING COMPLETE!")
-    print(f"Final Test Accuracy: {accuracy:.4f}")
-    print("="*60)
+    logger.info(f"Training complete! Final Test Accuracy: {accuracy:.4f}")
 
 if __name__ == "__main__":
     main()
