@@ -16,15 +16,22 @@ COPY requirements.txt .
 # Install Python dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy application files (models loaded from S3 at runtime)
+# Copy all application files
 COPY predict.py .
+COPY train.py .
+COPY entrypoint.sh .
+COPY data/ ./data/
+COPY optimization/ ./optimization/
+
+# Copy pre-trained model artifacts (if present; entrypoint will auto-train if missing)
+COPY model.pk[l] scaler.pk[l] le_sex.pk[l] le_embarked.pk[l] ./
 
 # Expose port
 EXPOSE 8000
 
 # Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
     CMD python -c "from urllib.request import urlopen; urlopen('http://localhost:8000/health')"
 
-# Run the application
-CMD ["uvicorn", "predict:app", "--host", "0.0.0.0", "--port", "8000"]
+# Run entrypoint (auto-trains if models missing, then starts API)
+ENTRYPOINT ["bash", "/app/entrypoint.sh"]

@@ -10,15 +10,14 @@ services:
       - DYNAMODB_TABLE_NAME=predictions
       - RATE_LIMIT_TABLE=rate-limits
       - AWS_REGION=us-east-1
-      - ENABLE_RATE_LIMIT=false  
+      - ENABLE_RATE_LIMIT=false
       - UPLOAD_TO_S3=false
-    volumes:
-      - .:/app  
     healthcheck:
       test: ["CMD", "python", "-c", "from urllib.request import urlopen; urlopen('http://localhost:8000/health')"]
       interval: 10s
       timeout: 5s
-      retries: 3
+      start_period: 40s
+      retries: 5
 
   dashboard:
     build:
@@ -31,10 +30,9 @@ services:
     depends_on:
       api:
         condition: service_healthy
-    volumes:
-      - .:/app  
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8501/_stcore/health"]
       interval: 10s
       timeout: 5s
+      start_period: 10s
       retries: 3

@@ -6,9 +6,15 @@ __pycache__
 .Python
 venv/
 notebooks/
-data/
-optimization/
 *.ipynb
 .git/
 .gitignore
 README.md
+.claude/
+.github/
+.pytest_cache/
+docs/
+deploy/
+infra/
+config/
+optimization_results.png

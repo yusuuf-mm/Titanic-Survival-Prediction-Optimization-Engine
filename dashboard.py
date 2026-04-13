@@ -436,7 +436,8 @@ st.markdown("""
 # ─────────────────────────────────────────────
 #  CONSTANTS & STATE
 # ─────────────────────────────────────────────
-DEFAULT_API_URL = "http://localhost:8000"
+import os
+DEFAULT_API_URL = os.getenv("API_URL", "http://localhost:8000")
 
 # ─────────────────────────────────────────────
 #  SIDEBAR

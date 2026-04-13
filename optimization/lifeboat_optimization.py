@@ -52,17 +52,26 @@ class LifeboatOptimizer:
     """
     
     def __init__(self):
-        """Load ML model and preprocessors from S3 using streaming"""
+        """Load ML model and preprocessors from S3 or locally"""
+        UPLOAD_TO_S3 = os.getenv('UPLOAD_TO_S3', 'false').lower() == 'true'
         try:
-            s3 = get_s3_client()
-            # Use BytesIO for streaming load to avoid loading entire file into memory
-            self.model = joblib.load(BytesIO(s3.get_object(Bucket=S3_BUCKET, Key='model.pkl')['Body'].read()))
-            self.scaler = joblib.load(BytesIO(s3.get_object(Bucket=S3_BUCKET, Key='scaler.pkl')['Body'].read()))
-            self.le_sex = joblib.load(BytesIO(s3.get_object(Bucket=S3_BUCKET, Key='le_sex.pkl')['Body'].read()))
-            self.le_embarked = joblib.load(BytesIO(s3.get_object(Bucket=S3_BUCKET, Key='le_embarked.pkl')['Body'].read()))
-            logger.info("Models loaded successfully from S3 for optimization")
+            if UPLOAD_TO_S3:
+                s3 = get_s3_client()
+                # Use BytesIO for streaming load to avoid loading entire file into memory
+                self.model = joblib.load(BytesIO(s3.get_object(Bucket=S3_BUCKET, Key='model.pkl')['Body'].read()))
+                self.scaler = joblib.load(BytesIO(s3.get_object(Bucket=S3_BUCKET, Key='scaler.pkl')['Body'].read()))
+                self.le_sex = joblib.load(BytesIO(s3.get_object(Bucket=S3_BUCKET, Key='le_sex.pkl')['Body'].read()))
+                self.le_embarked = joblib.load(BytesIO(s3.get_object(Bucket=S3_BUCKET, Key='le_embarked.pkl')['Body'].read()))
+                logger.info("Models loaded successfully from S3 for optimization")
+            else:
+                base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+                self.model = joblib.load(os.path.join(base_dir, 'model.pkl'))
+                self.scaler = joblib.load(os.path.join(base_dir, 'scaler.pkl'))
+                self.le_sex = joblib.load(os.path.join(base_dir, 'le_sex.pkl'))
+                self.le_embarked = joblib.load(os.path.join(base_dir, 'le_embarked.pkl'))
+                logger.info("Models loaded successfully from local files for optimization")
         except Exception as e:
-            logger.error(f"Failed to load models from S3: {e}")
+            logger.error(f"Failed to load models: {e}")
             raise
 
     def log_optimization_to_dynamodb(self, results, capacity, priority_children, priority_women, max_family_members):
@@ -263,7 +272,8 @@ class LifeboatOptimizer:
         axes[1, 2].set_ylabel('Fare')
         
         plt.tight_layout()
-        plt.show()
+        plt.savefig('optimization_results.png')
+        logger.info("Optimization visualization saved to optimization_results.png")
 
 def main():
     """Example usage"""
@@ -273,11 +283,13 @@ def main():
     
     # Load sample data
     print("\nLoading Titanic dataset...")
-    df = pd.read_csv('../data/titanic.csv')
+    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    df = pd.read_csv(os.path.join(base_dir, 'data', 'titanic.csv'))
     
     # Take a subset for demonstration
     sample_df = df.sample(n=200, random_state=42).reset_index(drop=True)
     
+    # ... rest identical until the end ...
     # Initialize optimizer
     logger.info("Initializing optimizer...")
     optimizer = LifeboatOptimizer()

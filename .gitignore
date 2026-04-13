@@ -1,1 +1,29 @@
-.bruin.yml
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Environments
+.env
+.venv
+env/
+venv/
+ENV/
+
+# Model artifacts (if you prefer not to track them, but user had them tracked)
+# *.pkl
+
+# Visualization outputs
+optimization_results.png
+*.log
+
+# IDEs
+.vscode/
+.idea/
+.claude/
+
+# Docker
+.dockerignore
+!Dockerfile
+!Dockerfile.*
+!docker-compose.yml

@@ -21,18 +21,16 @@ from io import BytesIO
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-# Environment variables for configuration
+# Environment variables for configuration (lazy defaults - validated at runtime)
 S3_BUCKET = os.getenv('S3_BUCKET_NAME', 'titanic-prediction-bucket')
-DYNAMODB_TABLE = os.getenv('DYNAMODB_TABLE_NAME', 'predictions')
-RATE_LIMIT_TABLE = os.getenv('RATE_LIMIT_TABLE', 'rate-limits')
 AWS_REGION = os.getenv('AWS_REGION', 'us-east-1')
-ENABLE_RATE_LIMIT = os.getenv('ENABLE_RATE_LIMIT', 'true').lower() == 'true'
+ENABLE_RATE_LIMIT = os.getenv('ENABLE_RATE_LIMIT', 'false').lower() == 'true'
 
-# Validate required environment variables
-if not DYNAMODB_TABLE:
-    raise ValueError("DYNAMODB_TABLE_NAME environment variable is required")
-if not RATE_LIMIT_TABLE:
-    raise ValueError("RATE_LIMIT_TABLE environment variable is required")
+def getDynamodbTable():
+    return os.getenv('DYNAMODB_TABLE_NAME', 'predictions')
+
+def getRateLimitTable():
+    return os.getenv('RATE_LIMIT_TABLE', 'rate-limits')
 
 # Lazy AWS client initialization
 _s3_client = None
@@ -70,13 +68,22 @@ def load_model_from_s3(bucket, key):
         logger.error(f"Failed to load {key} from S3: {e}")
         raise
 
-# Load models and preprocessors from S3
+# Load models and preprocessors from S3 or locally
+UPLOAD_TO_S3 = os.getenv('UPLOAD_TO_S3', 'false').lower() == 'true'
+
 try:
-    model = load_model_from_s3(S3_BUCKET, 'model.pkl')
-    scaler = load_model_from_s3(S3_BUCKET, 'scaler.pkl')
-    le_sex = load_model_from_s3(S3_BUCKET, 'le_sex.pkl')
-    le_embarked = load_model_from_s3(S3_BUCKET, 'le_embarked.pkl')
-    logger.info("Models loaded successfully from S3!")
+    if UPLOAD_TO_S3:
+        model = load_model_from_s3(S3_BUCKET, 'model.pkl')
+        scaler = load_model_from_s3(S3_BUCKET, 'scaler.pkl')
+        le_sex = load_model_from_s3(S3_BUCKET, 'le_sex.pkl')
+        le_embarked = load_model_from_s3(S3_BUCKET, 'le_embarked.pkl')
+        logger.info("Models loaded successfully from S3!")
+    else:
+        model = joblib.load('model.pkl')
+        scaler = joblib.load('scaler.pkl')
+        le_sex = joblib.load('le_sex.pkl')
+        le_embarked = joblib.load('le_embarked.pkl')
+        logger.info("Models loaded successfully from local files!")
 except Exception as e:
     logger.error(f"Error loading models: {e}")
     model = None
@@ -127,7 +134,7 @@ def log_prediction_to_dynamodb(passenger_data, prediction, probability):
             'survived': {'N': str(prediction)},
             'survival_probability': {'N': str(probability)}
         }
-        client.put_item(TableName=DYNAMODB_TABLE, Item=item)
+        client.put_item(TableName=getDynamodbTable(), Item=item)
         logger.info("Prediction logged to DynamoDB")
     except Exception as e:
         logger.error(f"Failed to log prediction to DynamoDB: {e}")
@@ -156,7 +163,7 @@ def rate_limit(request: Request):
         
         # Try to get current count from DynamoDB
         response = dynamodb.get_item(
-            TableName=RATE_LIMIT_TABLE,
+            TableName=getRateLimitTable(),
             Key={'id': {'S': rate_key}}
         )
         
@@ -167,7 +174,7 @@ def rate_limit(request: Request):
             if expires_at > 0 and current_time > expires_at:
                 # Entry expired, delete it and start fresh
                 dynamodb.delete_item(
-                    TableName=RATE_LIMIT_TABLE,
+                    TableName=getRateLimitTable(),
                     Key={'id': {'S': rate_key}}
                 )
                 current_count = 0
@@ -180,7 +187,7 @@ def rate_limit(request: Request):
         
         # Increment counter
         dynamodb.put_item(
-            TableName=RATE_LIMIT_TABLE,
+            TableName=getRateLimitTable(),
             Item={
                 'id': {'S': rate_key},
                 'count': {'N': str(current_count + 1)},
@@ -321,6 +328,54 @@ def predict_batch(data: BatchPassengerData, request: Request):
 
     logger.info(f"Batch prediction completed for {len(data.passengers)} passengers")
     return {"predictions": results}
+
+from optimization.lifeboat_optimization import LifeboatOptimizer
+try:
+    optimizer = LifeboatOptimizer()
+except Exception as e:
+    logger.error(f"Failed to initialize LifeboatOptimizer: {e}")
+    optimizer = None
+
+class OptimizationRequest(BaseModel):
+    passengers: list[dict]
+    capacity: int
+    priority_children: bool = True
+    priority_women: bool = True
+    max_family_members: Optional[int] = None
+
+@app.post("/optimize-allocation")
+def optimize_allocation_endpoint(req: OptimizationRequest, request: Request):
+    """
+    Optimize lifeboat allocation
+    """
+    rate_limit(request)
+    
+    if optimizer is None:
+        raise HTTPException(status_code=503, detail="Optimizer not loaded")
+        
+    try:
+        df = pd.DataFrame(req.passengers)
+        results = optimizer.optimize_allocation(
+            df, 
+            req.capacity, 
+            priority_children=req.priority_children, 
+            priority_women=req.priority_women, 
+            max_family_members=req.max_family_members
+        )
+        
+        # Convert passengers_data dataframe back to dicts for JSON
+        res_dict = {
+            'status': results['status'],
+            'objective_value': results['objective_value'],
+            'selected_passengers': results['passengers_data'].to_dict(orient='records'),
+            'selected_count': results['selected_count'],
+            'capacity': results['capacity'],
+            'utilization': results['utilization']
+        }
+        return res_dict
+    except Exception as e:
+        logger.error(f"Optimization error: {e}")
+        raise HTTPException(status_code=500, detail=f"Optimization error: {str(e)}")
 
 if __name__ == "__main__":
     import uvicorn
