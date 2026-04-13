@@ -1,349 +1,134 @@
-# Titanic Survival Prediction with Operations Research Optimization
+# Titanic Survival Prediction & Lifeboat Optimization Engine
 
-A comprehensive machine learning project that predicts Titanic passenger survival and optimizes lifeboat resource allocation using Operations Research techniques.
+A premium, full-stack decision intelligence system that fuses **Machine Learning** predictions with **Operations Research** optimization. This project not only predicts passenger survival but also solves the critical resource allocation problem: "How to maximize survivors under strict lifeboat capacity and ethical constraints?"
 
 ![Python](https://img.shields.io/badge/python-3.10-blue)
 ![FastAPI](https://img.shields.io/badge/FastAPI-0.104-green)
+![Streamlit](https://img.shields.io/badge/Streamlit-1.28-red)
 ![Docker](https://img.shields.io/badge/Docker-enabled-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
-## 📋 Table of Contents
-- [Problem Description](#problem-description)
-- [Features](#features)
-- [Project Structure](#project-structure)
-- [Installation](#installation)
-- [Usage](#usage)
-- [Model Performance](#model-performance)
-- [API Documentation](#api-documentation)
-- [Operations Research Component](#operations-research-component)
-- [Deployment](#deployment)
-- [Technologies Used](#technologies-used)
+## 🌟 Key Features
 
-## 🎯 Problem Description
+- 🔮 **ML Prediction API**: High-performance survival classifier powered by **XGBoost**.
+- 🧮 **Optimization Engine**: Linear Programming (LP) solver using **PuLP** to allocate limited lifeboat seats based on predictive risk and ethical priority rules.
+- 🎨 **Executive Dashboard**: A stunning, modern **Streamlit** UI for real-time inference and optimization visualization.
+- 🐳 **One-Command Deployment**: Fully containerized with **Docker Compose**, including auto-training capabilities.
+- 🚀 **Auto-Recovery**: Intelligent entrypoint that automatically trains models on startup if artifacts are missing.
 
-### Core ML Problem
-This project tackles a **binary classification** problem: predicting whether a passenger would survive the Titanic disaster based on demographic, socio-economic, and travel features.
+---
 
-**Why it matters:**
-- Real historical dataset widely used for ML benchmarking
-- Mix of categorical and numerical features ideal for feature engineering
-- Demonstrates end-to-end ML pipeline from EDA to deployment
-
-### Unique Twist: Operations Research Integration
-After training survival prediction models, we apply **linear programming optimization** to solve a resource allocation problem:
-
-> *If rescue resources (lifeboat seats) are limited, how can we maximize expected survivors while respecting fairness constraints?*
-
-This combines **predictive analytics** with **prescriptive optimization** - a powerful approach for real-world decision-making.
-
-## ✨ Features
-
-- ✅ Comprehensive Exploratory Data Analysis (EDA)
-- ✅ Multiple ML models (Logistic Regression, Random Forest, XGBoost, Neural Networks)
-- ✅ Hyperparameter tuning with GridSearchCV
-- ✅ RESTful API with FastAPI
-- ✅ Docker containerization
-- ✅ Cloud deployment ready
-- ✅ Operations Research optimization for resource allocation
-- ✅ Complete reproducibility with virtual environment management
-
-## 📁 Project Structure
+## 🏗️ Project Architecture
 
 ```
-titanic-ml-or-project/
+Titanic-Optimization-Engine/
 │
-├── data/
-│   └── titanic.csv                    # Dataset
+├── api/ (Root)
+│   ├── predict.py             # FastAPI prediction & optimization endpoints
+│   ├── train.py               # XGBoost training pipeline
+│   ├── entrypoint.sh          # Intelligent startup & auto-training script
+│   └── model.pkl              # Trained artifacts (auto-generated)
 │
-├── notebooks/
-│   ├── eda.ipynb                      # Exploratory Data Analysis
-│   └── training.ipynb                 # Model training & evaluation
+├── dashboard.py               # Streamlit Executive Dashboard
 │
 ├── optimization/
-│   └── lifeboat_optimization.py       # OR optimization module
+│   ├── __init__.py            # Module initialization
+│   └── lifeboat_optimization.py # LP Optimization logic
 │
-├── train.py                           # Training script
-├── predict.py                         # FastAPI prediction service
-├── model.pkl                          # Trained XGBoost model
-├── scaler.pkl                         # Feature scaler
-├── le_sex.pkl                         # Sex label encoder
-├── le_embarked.pkl                    # Embarked label encoder
-├── requirements.txt                   # Python dependencies
-├── Dockerfile                         # Container configuration
-└── README.md                          # This file
+├── data/
+│   └── titanic.csv            # Historical passenger data
+│
+├── Dockerfile                 # API Container definition
+├── Dockerfile.dashboard       # Dashboard Container definition
+└── docker-compose.yml         # Full system orchestration
 ```
 
-## 🚀 Installation
+---
 
-### Prerequisites
-- Python 3.10+
-- pip
-- Docker (optional, for containerization)
+## 🚀 Quick Start (Recommended)
 
-### Setup
+The entire system is integrated. You don't need to manually train models or install local dependencies if you have Docker.
 
-1. **Clone the repository**
+### 1. Start the Engine
 ```bash
-git clone https://github.com/yourusername/titanic-ml-or-project.git
-cd titanic-ml-or-project
+docker compose up --build -d
 ```
 
-2. **Create virtual environment**
-```bash
-python3 -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
-```
+### 2. Access the System
+- **Executive Dashboard**: `http://localhost:8501`
+- **Inference API**: `http://localhost:8000/docs`
 
-3. **Install dependencies**
+---
+
+## 💻 Manual Setup (Development)
+
+### 1. Installation
 ```bash
-pip install --upgrade pip
+git clone https://github.com/yusuuf-mm/Titanic-Survival-Prediction-Optimization-Engine.git
+cd Titanic-Survival-Prediction-Optimization-Engine
+python -m venv venv
+source venv/bin/activate  # Windows: venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
-4. **Download dataset**
-```python
-# Run this in Python
-import seaborn as sns
-titanic = sns.load_dataset('titanic')
-titanic.to_csv('data/titanic.csv', index=False)
-```
-
-## 📊 Usage
-
-### 1. Exploratory Data Analysis
-```bash
-jupyter notebook notebooks/eda.ipynb
-```
-
-### 2. Train Model
+### 2. Training
 ```bash
 python train.py
 ```
 
-This will:
-- Load and preprocess the Titanic dataset
-- Train an XGBoost classifier
-- Save the model and preprocessing objects
-- Display performance metrics
-
-### 3. Run API Locally
+### 3. Run Services
 ```bash
+# Terminal 1: API
 uvicorn predict:app --reload
+
+# Terminal 2: Dashboard
+streamlit run dashboard.py
 ```
 
-Visit `http://localhost:8000/docs` for interactive API documentation.
+---
 
-### 4. Make Predictions
+## 🧮 The Optimization Problem
 
-**Using curl:**
-```bash
-curl -X POST "http://localhost:8000/predict" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "pclass": 1,
-    "sex": "female",
-    "age": 29,
-    "sibsp": 0,
-    "parch": 0,
-    "fare": 211.5,
-    "embarked": "S"
-  }'
-```
+We treat lifeboat allocation as a **Mixed-Integer Programming (MIP)** problem.
 
-**Response:**
-```json
-{
-  "survived": 1,
-  "survival_probability": 0.94,
-  "message": "Likely to survive"
-}
-```
+**Objective:**
+Maximize $\sum (p_i \cdot x_i)$ where $p_i$ is the predicted survival probability of passenger $i$, and $x_i$ is the binary decision to allocate a seat.
 
-### 5. Run Optimization
-```bash
-cd optimization
-python lifeboat_optimization.py
-```
+**Constraints Support:**
+1.  **Capacity**: $\sum x_i \leq \text{Available Seats}$
+2.  **Vulnerable Priority**: Guarantees $\geq 30\%$ children and $\geq 50\%$ women.
+3.  **Family Cohesion**: Limits seat allocation per family to ensure broader distribution.
 
-## 📈 Model Performance
+---
 
-| Model | Accuracy | Precision | Recall | F1 Score | AUC |
-|-------|----------|-----------|--------|----------|-----|
-| Logistic Regression | 0.81 | 0.79 | 0.74 | 0.76 | 0.86 |
-| Decision Tree | 0.78 | 0.75 | 0.71 | 0.73 | 0.78 |
-| Random Forest | 0.83 | 0.82 | 0.77 | 0.79 | 0.89 |
-| **XGBoost (Best)** | **0.85** | **0.84** | **0.80** | **0.82** | **0.91** |
-| Neural Network | 0.82 | 0.81 | 0.76 | 0.78 | 0.88 |
+## 🔌 API Summary
 
-### Key Features by Importance:
-1. Sex (0.32)
-2. Fare (0.21)
-3. Age (0.18)
-4. Pclass (0.15)
-5. Family Size (0.08)
+| Method | Endpoint | Description |
+| :--- | :--- | :--- |
+| `POST` | `/predict` | Single passenger survival inference |
+| `POST` | `/predict/batch` | Bulk inference for up to 100 passengers |
+| `POST` | `/optimize-allocation` | Solve LP seat allocation for a crowd |
+| `GET` | `/health` | System health check |
 
-## 🔌 API Documentation
+---
 
-### Endpoints
+## 📊 Model Performance
 
-#### `GET /`
-Health check and API info
+| Algorithm | Accuracy | F1 Score | AUC |
+| :--- | :--- | :--- | :--- |
+| **XGBoost (Active)** | **0.85** | **0.82** | **0.91** |
+| Random Forest | 0.83 | 0.79 | 0.89 |
+| Logistic Regression | 0.81 | 0.76 | 0.86 |
 
-#### `GET /health`
-Returns API health status
-
-#### `POST /predict`
-Make a single prediction
-
-**Request Body:**
-```json
-{
-  "pclass": 3,
-  "sex": "male",
-  "age": 22.0,
-  "sibsp": 1,
-  "parch": 0,
-  "fare": 7.25,
-  "embarked": "S"
-}
-```
-
-**Response:**
-```json
-{
-  "survived": 0,
-  "survival_probability": 0.15,
-  "message": "Unlikely to survive"
-}
-```
-
-#### `POST /predict/batch`
-Make multiple predictions at once
-
-## 🧮 Operations Research Component
-
-### Problem Formulation
-
-**Decision Variable:**
-- `x[i]` = 1 if passenger i is allocated a lifeboat seat, 0 otherwise
-
-**Objective Function:**
-```
-Maximize: Σ (survival_probability[i] × x[i])
-```
-
-**Constraints:**
-1. **Capacity:** Σ x[i] ≤ available_seats
-2. **Children Priority:** Σ x[children] ≥ 0.3 × capacity
-3. **Women Priority:** Σ x[women] ≥ 0.5 × capacity
-4. **Family Limit:** Σ x[family] ≤ max_family_members
-
-### Example Results
-
-For 100 available seats from 200 passengers:
-- **Expected Survivors:** 87.3
-- **Utilization:** 100%
-- **Demographics:**
-  - Children: 32
-  - Women: 58
-  - Men: 10
-
-This demonstrates how ML predictions + optimization can support **ethical, data-driven decision-making** under resource constraints.
-
-## 🐳 Deployment
-
-### Docker
-
-**Build image:**
-```bash
-docker build -t titanic-api .
-```
-
-**Run container:**
-```bash
-docker run -d -p 8000:8000 --name titanic-container titanic-api
-```
-
-**Test:**
-```bash
-curl http://localhost:8000/health
-```
-
-### Google Cloud Run
-
-```bash
-# Build and deploy
-gcloud builds submit --tag gcr.io/YOUR_PROJECT_ID/titanic-api
-gcloud run deploy titanic-api \
-  --image gcr.io/YOUR_PROJECT_ID/titanic-api \
-  --platform managed \
-  --region us-central1 \
-  --allow-unauthenticated
-```
-
-### Render.com
-
-1. Push to GitHub
-2. Connect repo on Render.com
-3. Select **Docker** environment
-4. Deploy automatically
-
-## 🛠️ Technologies Used
-
-### Machine Learning
-- **scikit-learn** - Classical ML algorithms
-- **XGBoost** - Gradient boosting
-- **TensorFlow/Keras** - Neural networks
-- **pandas & numpy** - Data manipulation
-
-### Optimization
-- **PuLP** - Linear programming solver
-
-### API & Deployment
-- **FastAPI** - Modern Python web framework
-- **Uvicorn** - ASGI server
-- **Docker** - Containerization
-- **Google Cloud Run / Render** - Cloud hosting
-
-### Data Analysis
-- **seaborn & matplotlib** - Visualization
-- **Jupyter** - Interactive notebooks
-
-## 📝 Reproducibility Checklist
-
-✅ Dataset included in repository  
-✅ Virtual environment with `requirements.txt`  
-✅ Clear installation instructions  
-✅ Trained model artifacts saved  
-✅ Complete training script (`train.py`)  
-✅ Comprehensive README  
-✅ Docker configuration  
-✅ Cloud deployment guide  
-
-## 🎓 Academic Contribution
-
-This project demonstrates:
-1. **End-to-end ML pipeline** (EDA → Training → Deployment)
-2. **Multiple model comparison** with hyperparameter tuning
-3. **Production-ready API** with FastAPI
-4. **Containerization** for reproducibility
-5. **Operations Research integration** for decision optimization
-
-Perfect for capstone projects requiring ML + OR combination.
-
-## 📄 License
-
-MIT License - feel free to use for learning and projects.
-
-## 🤝 Contributing
-
-Contributions welcome! Please open an issue or submit a pull request.
+---
 
 ## 👤 Author
 
-Yusuf Musa - yusuf2000mm@gmail.com
+**Yusuf Musa**
+- 📧 [yusuf2000mm@gmail.com](mailto:yusuf2000mm@gmail.com)
+- 🔗 [GitHub](https://github.com/yusuuf-mm)
 
-## 🙏 Acknowledgments
+---
 
-- Titanic dataset from Seaborn/Kaggle
-- DataTalks.Club ML Zoomcamp for project structure inspiration
+## 📄 License
+MIT License - Copyright (c) 2026 Yusuf Musa.
