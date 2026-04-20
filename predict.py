@@ -9,8 +9,9 @@ import joblib
 import numpy as np
 import pandas as pd
 from typing import Optional
-import os
 import boto3
+import io
+import os
 import logging
 from datetime import datetime
 from functools import wraps
@@ -21,27 +22,17 @@ from io import BytesIO
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-# Environment variables for configuration (lazy defaults - validated at runtime)
-S3_BUCKET = os.getenv('S3_BUCKET_NAME', 'titanic-prediction-bucket')
-AWS_REGION = os.getenv('AWS_REGION', 'us-east-1')
-ENABLE_RATE_LIMIT = os.getenv('ENABLE_RATE_LIMIT', 'false').lower() == 'true'
+# AWS Configuration
+S3_BUCKET_NAME = os.getenv("S3_BUCKET_NAME")
+AWS_REGION = os.getenv('AWS_DEFAULT_REGION', 'us-east-1')
 
-def getDynamodbTable():
-    return os.getenv('DYNAMODB_TABLE_NAME', 'predictions')
+# Initialize S3 client
+s3 = boto3.client("s3", region_name=AWS_REGION)
 
-def getRateLimitTable():
-    return os.getenv('RATE_LIMIT_TABLE', 'rate-limits')
-
-# Lazy AWS client initialization
-_s3_client = None
-_dynamodb_client = None
-
-def get_s3_client():
-    """Lazy initialization of S3 client"""
-    global _s3_client
-    if _s3_client is None:
-        _s3_client = boto3.client('s3', region_name=AWS_REGION)
-    return _s3_client
+def load_from_s3(key):
+    """Clean helper function to load artifacts from S3"""
+    obj = s3.get_object(Bucket=S3_BUCKET_NAME, Key=key)
+    return joblib.load(io.BytesIO(obj["Body"].read()))
 
 def get_dynamodb_client():
     """Lazy initialization of DynamoDB client"""
@@ -58,35 +49,32 @@ app = FastAPI(
 )
 
 
-def load_model_from_s3(bucket, key):
-    """Load model artifact from S3 using streaming"""
-    try:
-        client = get_s3_client()
-        response = client.get_object(Bucket=bucket, Key=key)
-        return joblib.load(BytesIO(response['Body'].read()))
-    except Exception as e:
-        logger.error(f"Failed to load {key} from S3: {e}")
-        raise
+# Environment variables for features
+ENABLE_RATE_LIMIT = os.getenv('ENABLE_RATE_LIMIT', 'false').lower() == 'true'
 
-# Load models and preprocessors from S3 or locally
-UPLOAD_TO_S3 = os.getenv('UPLOAD_TO_S3', 'false').lower() == 'true'
+def getDynamodbTable():
+    return os.getenv('DYNAMODB_TABLE_NAME', 'predictions')
 
+def getRateLimitTable():
+    return os.getenv('RATE_LIMIT_TABLE', 'rate-limits')
+
+# Lazy DynamoDB initialization
+_dynamodb_client = None
+
+# Load All Your Artifacts from S3
 try:
-    if UPLOAD_TO_S3:
-        model = load_model_from_s3(S3_BUCKET, 'model.pkl')
-        scaler = load_model_from_s3(S3_BUCKET, 'scaler.pkl')
-        le_sex = load_model_from_s3(S3_BUCKET, 'le_sex.pkl')
-        le_embarked = load_model_from_s3(S3_BUCKET, 'le_embarked.pkl')
-        logger.info("Models loaded successfully from S3!")
-    else:
-        model = joblib.load('model.pkl')
-        scaler = joblib.load('scaler.pkl')
-        le_sex = joblib.load('le_sex.pkl')
-        le_embarked = joblib.load('le_embarked.pkl')
-        logger.info("Models loaded successfully from local files!")
+    logger.info(f"Loading artifacts from S3 bucket: {S3_BUCKET_NAME}")
+    model = load_from_s3("model.pkl")
+    scaler = load_from_s3("scaler.pkl")
+    le_sex = load_from_s3("le_sex.pkl")
+    le_embarked = load_from_s3("le_embarked.pkl")
+    logger.info("Artifacts successfully loaded from S3.")
 except Exception as e:
-    logger.error(f"Error loading models: {e}")
+    logger.error(f"CRITICAL: Failed to load artifacts from S3: {e}")
     model = None
+    scaler = None
+    le_sex = None
+    le_embarked = None
 
 # Input schema
 class PassengerData(BaseModel):
@@ -97,9 +85,8 @@ class PassengerData(BaseModel):
     parch: int = Field(..., ge=0, description="Number of parents/children aboard")
     fare: float = Field(..., ge=0, description="Passenger fare")
     embarked: str = Field(..., description="Port of embarkation (C, Q, or S)")
-    
-    class Config:
-        json_schema_extra = {
+
+    model_config = {"json_schema_extra": {
             "example": {
                 "pclass": 3,
                 "sex": "male",
@@ -109,7 +96,7 @@ class PassengerData(BaseModel):
                 "fare": 7.25,
                 "embarked": "S"
             }
-        }
+        }}
 
 # Output schema
 class PredictionResponse(BaseModel):
