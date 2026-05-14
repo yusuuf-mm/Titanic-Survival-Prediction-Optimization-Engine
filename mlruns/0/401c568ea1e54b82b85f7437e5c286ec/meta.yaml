@@ -1,0 +1,14 @@
+artifact_uri: file:///workspaces/Titanic-Survival-Prediction-Optimization-Engine/mlruns/0/401c568ea1e54b82b85f7437e5c286ec/artifacts
+end_time: 1776775055450
+entry_point_name: ''
+experiment_id: '0'
+lifecycle_stage: active
+run_id: 401c568ea1e54b82b85f7437e5c286ec
+run_name: delightful-rook-868
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1776775050779
+status: 3
+tags: []
+user_id: codespace

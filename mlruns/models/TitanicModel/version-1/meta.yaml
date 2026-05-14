@@ -1,0 +1,16 @@
+creation_timestamp: 1776775055443
+current_stage: None
+deployment_job_state: null
+description: null
+last_updated_timestamp: 1776775055443
+model_id: m-dce0cb67d7c3403b9477f240468902bc
+name: TitanicModel
+run_id: 401c568ea1e54b82b85f7437e5c286ec
+run_link: null
+source: models:/m-dce0cb67d7c3403b9477f240468902bc
+status: READY
+status_message: null
+storage_location: file:///workspaces/Titanic-Survival-Prediction-Optimization-Engine/mlruns/0/models/m-dce0cb67d7c3403b9477f240468902bc/artifacts
+user_id: null
+version: 1
+workspace: default

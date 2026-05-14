@@ -1,0 +1,14 @@
+artifact_uri: file:///workspaces/Titanic-Survival-Prediction-Optimization-Engine/mlruns/0/5df81b2acbaa46e5ae3f9515a6247458/artifacts
+end_time: 1776731743068
+entry_point_name: ''
+experiment_id: '0'
+lifecycle_stage: active
+run_id: 5df81b2acbaa46e5ae3f9515a6247458
+run_name: dazzling-conch-633
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1776731738078
+status: 3
+tags: []
+user_id: codespace

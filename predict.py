@@ -3,6 +3,10 @@
 Titanic Survival Prediction API
 """
 
+import mlflow
+import mlflow.xgboost
+mlflow.set_tracking_uri("file:./mlruns")
+
 from fastapi import FastAPI, HTTPException, Request
 from pydantic import BaseModel, Field
 import joblib
@@ -61,16 +65,22 @@ def getRateLimitTable():
 # Lazy DynamoDB initialization
 _dynamodb_client = None
 
-# Load All Your Artifacts from S3
+# MLflow Model Registry
+MODEL_NAME = "TitanicModel"
+
+# Load model from MLflow Model Registry, other artifacts from S3
 try:
-    logger.info(f"Loading artifacts from S3 bucket: {S3_BUCKET_NAME}")
-    model = load_from_s3("model.pkl")
+    logger.info(f"Loading model from MLflow Model Registry: {MODEL_NAME}")
+    model = mlflow.pyfunc.load_model("models:/TitanicModel@production")
+    logger.info("Model loaded from MLflow Model Registry successfully.")
+    
+    logger.info(f"Loading remaining artifacts from S3 bucket: {S3_BUCKET_NAME}")
     scaler = load_from_s3("scaler.pkl")
     le_sex = load_from_s3("le_sex.pkl")
     le_embarked = load_from_s3("le_embarked.pkl")
-    logger.info("Artifacts successfully loaded from S3.")
+    logger.info("Artifacts successfully loaded.")
 except Exception as e:
-    logger.error(f"CRITICAL: Failed to load artifacts from S3: {e}")
+    logger.error(f"CRITICAL: Failed to load artifacts: {e}")
     model = None
     scaler = None
     le_sex = None
@@ -262,12 +272,12 @@ def predict_survival(passenger: PassengerData, request: Request):
         X = scaler.transform(df)
 
         # Make prediction
-        prediction = model.predict(X)[0]
-        probability = model.predict_proba(X)[0][1]
+        prediction = int(model.predict(X)[0])
+        probability = float(prediction)  # temp
 
         # Prepare response
-        survived = int(prediction)
-        message = "Likely to survive" if survived == 1 else "Unlikely to survive"
+        survived = prediction
+        message = "Likely to survive" if survived == 1 else "Not likely to survive"
 
         # Log prediction to DynamoDB
         log_prediction_to_dynamodb(passenger, survived, probability)

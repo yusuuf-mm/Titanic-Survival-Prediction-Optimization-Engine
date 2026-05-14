@@ -1,0 +1,22 @@
+artifact_path: file:///workspaces/Titanic-Survival-Prediction-Optimization-Engine/mlruns/0/models/m-dce0cb67d7c3403b9477f240468902bc/artifacts
+flavors:
+  python_function:
+    data: model.ubj
+    env:
+      conda: conda.yaml
+      virtualenv: python_env.yaml
+    loader_module: mlflow.xgboost
+    python_version: 3.12.1
+  xgboost:
+    code: null
+    data: model.ubj
+    model_class: xgboost.sklearn.XGBClassifier
+    model_format: ubj
+    xgb_version: 3.2.0
+mlflow_version: 3.11.1
+model_id: m-dce0cb67d7c3403b9477f240468902bc
+model_size_bytes: 341064
+model_uuid: m-dce0cb67d7c3403b9477f240468902bc
+prompts: null
+run_id: 401c568ea1e54b82b85f7437e5c286ec
+utc_time_created: '2026-04-21 12:37:31.244192'

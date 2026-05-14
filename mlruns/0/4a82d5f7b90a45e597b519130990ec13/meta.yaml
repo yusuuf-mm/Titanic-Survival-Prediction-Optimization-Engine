@@ -1,0 +1,14 @@
+artifact_uri: file:///workspaces/Titanic-Survival-Prediction-Optimization-Engine/mlruns/0/4a82d5f7b90a45e597b519130990ec13/artifacts
+end_time: 1776730172179
+entry_point_name: ''
+experiment_id: '0'
+lifecycle_stage: active
+run_id: 4a82d5f7b90a45e597b519130990ec13
+run_name: caring-shark-615
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1776730167849
+status: 3
+tags: []
+user_id: codespace

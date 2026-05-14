@@ -1,0 +1,14 @@
+artifact_uri: file:///workspaces/Titanic-Survival-Prediction-Optimization-Engine/mlruns/0/c523993758694f1498bfa868c6994556/artifacts
+end_time: 1776774641313
+entry_point_name: ''
+experiment_id: '0'
+lifecycle_stage: active
+run_id: c523993758694f1498bfa868c6994556
+run_name: orderly-gnat-542
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1776774633247
+status: 3
+tags: []
+user_id: codespace

@@ -1,0 +1,9 @@
+aliases:
+  production: '1'
+creation_timestamp: 1776775055430
+deployment_job_id: null
+deployment_job_state: null
+description: null
+last_updated_timestamp: 1776776667976
+name: TitanicModel
+workspace: default

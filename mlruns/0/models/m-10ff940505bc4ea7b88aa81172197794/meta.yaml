@@ -1,0 +1,10 @@
+artifact_location: file:///workspaces/Titanic-Survival-Prediction-Optimization-Engine/mlruns/0/models/m-10ff940505bc4ea7b88aa81172197794/artifacts
+creation_timestamp: 1776731738433
+experiment_id: '0'
+last_updated_timestamp: 1776731742590
+model_id: m-10ff940505bc4ea7b88aa81172197794
+model_type: null
+name: model
+source_run_id: 5df81b2acbaa46e5ae3f9515a6247458
+status: 2
+status_message: null

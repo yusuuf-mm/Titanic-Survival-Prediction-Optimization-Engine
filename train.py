@@ -3,6 +3,10 @@
 Titanic Survival Prediction - Training Script
 """
 
+import mlflow
+
+mlflow.set_tracking_uri("file:./mlruns")
+
 import pandas as pd
 import numpy as np
 from sklearn.model_selection import train_test_split, GridSearchCV
@@ -13,6 +17,7 @@ import joblib
 import os
 import boto3
 import logging
+import mlflow.xgboost
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -186,33 +191,55 @@ def main():
     """Main training pipeline"""
     logger.info("Starting Titanic Survival Prediction - Training Pipeline")
     
-    # Load data
-    X, y = load_and_preprocess_data()
-    
-    # Split data
-    print("\nSplitting data...")
-    X_train, X_test, y_train, y_test = train_test_split(
-        X, y, test_size=0.2, random_state=42, stratify=y
-    )
-    print(f"Training set: {X_train.shape[0]} samples")
-    print(f"Test set: {X_test.shape[0]} samples")
-    
-    # Encode features
-    X_train, X_test, le_sex, le_embarked = encode_features(X_train, X_test)
-    
-    # Scale features
-    X_train_scaled, X_test_scaled, scaler = scale_features(X_train, X_test)
-    
-    # Train model
-    model = train_model(X_train_scaled, y_train, tune_hyperparameters=False)
-    
-    # Evaluate
-    accuracy = evaluate_model(model, X_test_scaled, y_test)
-    
-    # Upload to S3
-    upload_artifacts_to_s3(model, scaler, le_sex, le_embarked)
-    
-    logger.info(f"Training complete! Final Test Accuracy: {accuracy:.4f}")
+    with mlflow.start_run():
+        max_depth = 5
+        n_estimators = 200
+        learning_rate = 0.1
+        
+        mlflow.log_param("max_depth", max_depth)
+        mlflow.log_param("n_estimators", n_estimators)
+        mlflow.log_param("learning_rate", learning_rate)
+        
+        # Load data
+        X, y = load_and_preprocess_data()
+        
+        # Split data
+        print("\nSplitting data...")
+        X_train, X_test, y_train, y_test = train_test_split(
+            X, y, test_size=0.2, random_state=42, stratify=y
+        )
+        print(f"Training set: {X_train.shape[0]} samples")
+        print(f"Test set: {X_test.shape[0]} samples")
+        
+        # Encode features
+        X_train, X_test, le_sex, le_embarked = encode_features(X_train, X_test)
+        
+        # Scale features
+        X_train_scaled, X_test_scaled, scaler = scale_features(X_train, X_test)
+        
+        # Train model
+        model = train_model(X_train_scaled, y_train, tune_hyperparameters=False)
+        
+        # Evaluate
+        y_pred = model.predict(X_test_scaled)
+        accuracy = accuracy_score(y_test, y_pred)
+        mlflow.log_metric("accuracy", accuracy)
+        
+        evaluate_model(model, X_test_scaled, y_test)
+        
+        # Log model
+        mlflow.xgboost.log_model(model, "model")
+        
+        # Register model
+        mlflow.register_model(
+            f"runs:/{mlflow.active_run().info.run_id}/model",
+            "TitanicModel"
+        )
+        
+        # Upload to S3
+        print("Skipping S3 upload — using MLflow as model store")
+        
+        logger.info(f"Training complete! Final Test Accuracy: {accuracy:.4f}")
 
 if __name__ == "__main__":
     main()
