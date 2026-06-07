@@ -30,12 +30,19 @@ logger = logging.getLogger(__name__)
 S3_BUCKET_NAME = os.getenv("S3_BUCKET_NAME")
 AWS_REGION = os.getenv('AWS_DEFAULT_REGION', 'us-east-1')
 
-# Initialize S3 client
-s3 = boto3.client("s3", region_name=AWS_REGION)
+# Lazy S3 client initialization
+_s3_client = None
+
+def get_s3_client():
+    """Lazy initialization of S3 client"""
+    global _s3_client
+    if _s3_client is None:
+        _s3_client = boto3.client("s3", region_name=AWS_REGION)
+    return _s3_client
 
 def load_from_s3(key):
     """Clean helper function to load artifacts from S3"""
-    obj = s3.get_object(Bucket=S3_BUCKET_NAME, Key=key)
+    obj = get_s3_client().get_object(Bucket=S3_BUCKET_NAME, Key=key)
     return joblib.load(io.BytesIO(obj["Body"].read()))
 
 def get_dynamodb_client():
@@ -69,22 +76,31 @@ _dynamodb_client = None
 MODEL_NAME = "TitanicModel"
 
 # Load model from MLflow Model Registry, other artifacts from S3
+# Falls back to local .pkl files if MLflow/S3 are unavailable
 try:
     logger.info(f"Loading model from MLflow Model Registry: {MODEL_NAME}")
     model = mlflow.pyfunc.load_model("models:/TitanicModel@production")
     logger.info("Model loaded from MLflow Model Registry successfully.")
-    
+
     logger.info(f"Loading remaining artifacts from S3 bucket: {S3_BUCKET_NAME}")
     scaler = load_from_s3("scaler.pkl")
     le_sex = load_from_s3("le_sex.pkl")
     le_embarked = load_from_s3("le_embarked.pkl")
     logger.info("Artifacts successfully loaded.")
 except Exception as e:
-    logger.error(f"CRITICAL: Failed to load artifacts: {e}")
-    model = None
-    scaler = None
-    le_sex = None
-    le_embarked = None
+    logger.warning(f"MLflow/S3 load failed ({e}), falling back to local artifacts...")
+    try:
+        model = joblib.load("model.pkl")
+        scaler = joblib.load("scaler.pkl")
+        le_sex = joblib.load("le_sex.pkl")
+        le_embarked = joblib.load("le_embarked.pkl")
+        logger.info("Local artifact fallback succeeded.")
+    except Exception as e2:
+        logger.error(f"CRITICAL: Failed to load any artifacts: {e2}")
+        model = None
+        scaler = None
+        le_sex = None
+        le_embarked = None
 
 # Input schema
 class PassengerData(BaseModel):
@@ -221,15 +237,8 @@ def health_check():
     return {"status": "healthy", "model_loaded": True}
 
 # Prediction endpoint
-@app.post("/predict", response_model=PredictionResponse)
-def predict_survival(passenger: PassengerData, request: Request):
-    """
-    Predict whether a passenger would survive the Titanic disaster
-    """
-
-    # Rate limiting
-    rate_limit(request)
-
+def _predict_internal(passenger: PassengerData) -> PredictionResponse:
+    """Core prediction logic. No rate limiting — caller handles that."""
     if model is None:
         raise HTTPException(status_code=503, detail="Model not loaded")
 
@@ -273,7 +282,7 @@ def predict_survival(passenger: PassengerData, request: Request):
 
         # Make prediction
         prediction = int(model.predict(X)[0])
-        probability = float(prediction)  # temp
+        probability = float(model.predict_proba(X)[0][1])
 
         # Prepare response
         survived = prediction
@@ -284,16 +293,28 @@ def predict_survival(passenger: PassengerData, request: Request):
 
         return PredictionResponse(
             survived=survived,
-            survival_probability=float(probability),
+            survival_probability=probability,
             message=message
         )
 
     except ValueError as e:
         logger.warning(f"Validation error: {e}")
         raise HTTPException(status_code=400, detail=f"Invalid input: {str(e)}")
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Prediction error: {e}")
         raise HTTPException(status_code=500, detail=f"Prediction error: {str(e)}")
+
+
+@app.post("/predict", response_model=PredictionResponse)
+def predict_survival(passenger: PassengerData, request: Request):
+    """
+    Predict whether a passenger would survive the Titanic disaster
+    """
+    rate_limit(request)
+    return _predict_internal(passenger)
+
 
 # Batch prediction endpoint
 class BatchPassengerData(BaseModel):
@@ -302,23 +323,23 @@ class BatchPassengerData(BaseModel):
 @app.post("/predict/batch")
 def predict_batch(data: BatchPassengerData, request: Request):
     """
-    Make predictions for multiple passengers
+    Make predictions for multiple passengers (single rate-limit token).
     """
-    # Rate limiting
     rate_limit(request)
 
     if model is None:
         raise HTTPException(status_code=503, detail="Model not loaded")
 
-    # Additional validation for batch
     if len(data.passengers) > 100:
         raise HTTPException(status_code=400, detail="Batch size cannot exceed 100 passengers")
 
     results = []
     for passenger in data.passengers:
         try:
-            result = predict_survival(passenger, request)
+            result = _predict_internal(passenger)
             results.append(result.dict())
+        except HTTPException as e:
+            results.append({"error": e.detail})
         except Exception as e:
             logger.warning(f"Batch prediction error for passenger: {e}")
             results.append({"error": str(e)})

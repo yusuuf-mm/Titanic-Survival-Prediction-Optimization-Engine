@@ -17,8 +17,9 @@ with patch('boto3.client') as mock_boto:
 
 client = TestClient(app)
 
-@patch('predict.s3')
-def test_load_from_s3(mock_s3_client):
+@patch('predict.get_s3_client')
+def test_load_from_s3(mock_get_s3_client):
+    mock_s3_client = mock_get_s3_client.return_value
     # Mock S3 response
     mock_body = MagicMock()
     mock_body.read.return_value = b'fake_model_data'

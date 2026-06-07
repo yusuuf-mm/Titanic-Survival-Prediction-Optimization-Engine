@@ -1,6 +1,6 @@
 # Titanic Survival Prediction & Lifeboat Optimization Engine
 
-A premium, full-stack decision intelligence system that fuses **Machine Learning** predictions with **Operations Research** optimization. This project not only predicts passenger survival using an advanced ensemble model but also solves the critical resource allocation problem: "How to maximize survivors under strict lifeboat capacity and ethical constraints?"
+A full-stack decision intelligence system that fuses **Machine Learning** (XGBoost) with **Operations Research** (Mixed-Integer Programming via PuLP) to predict survival and optimize lifeboat allocation under real-world constraints.
 
 ![Python](https://img.shields.io/badge/python-3.10-blue)
 ![FastAPI](https://img.shields.io/badge/FastAPI-0.104-green)
@@ -9,6 +9,14 @@ A premium, full-stack decision intelligence system that fuses **Machine Learning
 ![AWS](https://img.shields.io/badge/AWS-S3%20%7C%20DynamoDB-orange)
 ![MLflow](https://img.shields.io/badge/MLflow-Tracking-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
+
+<p align="center">
+  <img src="docs/images/dashboard-preview.gif" alt="Titanic Decision Intelligence Dashboard" width="100%" />
+</p>
+
+<p align="center">
+  <em>Executive Dashboard — Single Prediction, Lifeboat Optimizer, 3D Rescue Map, and Model Insights</em>
+</p>
 
 ## 🌟 Key Features
 

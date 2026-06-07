@@ -229,16 +229,21 @@ def main():
         
         # Log model
         mlflow.xgboost.log_model(model, "model")
-        
-        # Register model
-        mlflow.register_model(
-            f"runs:/{mlflow.active_run().info.run_id}/model",
-            "TitanicModel"
+
+        # Register model and promote to Production
+        model_uri = f"runs:/{mlflow.active_run().info.run_id}/model"
+        registered = mlflow.register_model(model_uri, "TitanicModel")
+        mlflow.tracking.MlflowClient().transition_model_version_stage(
+            name="TitanicModel",
+            version=registered.version,
+            stage="Production",
+            archive_existing_versions=True,
         )
-        
-        # Upload to S3
-        print("Skipping S3 upload — using MLflow as model store")
-        
+        logger.info(f"Model registered and promoted to Production (version {registered.version})")
+
+        # Persist preprocessing artifacts (needed by predict.py / optimization)
+        upload_artifacts_to_s3(model, scaler, le_sex, le_embarked)
+
         logger.info(f"Training complete! Final Test Accuracy: {accuracy:.4f}")
 
 if __name__ == "__main__":
